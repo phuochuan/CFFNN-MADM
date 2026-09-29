@@ -1,0 +1,5 @@
+.venv/
+__pycache__/
+.pytest_cache/
+docs/paper_pages/
+docs/paper_extracted.txt

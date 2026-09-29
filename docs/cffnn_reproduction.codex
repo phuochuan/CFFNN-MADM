@@ -1,0 +1,293 @@
+# Codex Task: Reproduce CFFNN-based MADM Paper
+
+## Mục tiêu
+Reproduce bằng code numerical experiment trong bài:
+
+"Multiple attribute decision-making based on fuzzy neural network under complex Fermatean fuzzy data"
+Signal, Image and Video Processing (2025), 19:1171
+DOI: 10.1007/s11760-025-04660-0
+
+Mục tiêu phase 1 KHÔNG phải xây deep learning model mới.
+Mục tiêu là reproduce đúng pipeline toán học của paper:
+
+CFF decision matrix
+→ Schweizer–Sklar operators
+→ CFF operational laws
+→ CFFSSTWA / CFFSSTOWA / CFFSSTHWA
+→ hidden layer
+→ output layer
+→ score function
+→ ranking
+
+Expected final score theo paper:
+- Z1 = 0.0199
+- Z2 = 0.5478
+- Z3 = 0.2979
+- Z4 = 0.5148
+
+Expected ranking:
+Z2 > Z4 > Z3 > Z1
+
+## Nguyên tắc làm việc
+1. Bám sát công thức trong paper.
+2. Không tự "sửa" công thức nếu chưa chứng minh được paper sai.
+3. Mỗi công thức phải được map rõ từ paper → code.
+4. Mỗi intermediate result phải có unit test.
+5. Ưu tiên reproduce Table 3 và Table 4 trước khi kiểm tra final ranking.
+6. Nếu notation trong paper mơ hồ hoặc không nhất quán:
+   - ghi chú rõ;
+   - implement từng interpretation hợp lý;
+   - đối chiếu với intermediate values của paper;
+   - không âm thầm chọn một công thức khác.
+7. Không dùng PyTorch/TensorFlow trong phase 1.
+8. Dùng Python + NumPy + pytest.
+9. Tất cả floating-point comparisons dùng tolerance phù hợp, mặc định abs=1e-4.
+10. Viết code dễ đọc, tách module, có docstring ngắn cho các công thức toán.
+
+## Kiến trúc project đề xuất
+
+cffnn-reproduction/
+├── src/
+│   ├── cff.py
+│   ├── schweizer_sklar.py
+│   ├── operations.py
+│   ├── aggregation.py
+│   ├── score.py
+│   └── madm.py
+├── data/
+│   └── paper_case.py
+├── tests/
+│   ├── test_cff.py
+│   ├── test_schweizer_sklar.py
+│   ├── test_operations.py
+│   ├── test_aggregation.py
+│   ├── test_hidden_layer.py
+│   └── test_paper_result.py
+├── reproduce.py
+├── requirements.txt
+└── README.md
+
+## Data model
+
+Tạo dataclass:
+
+```python
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class CFFNumber:
+    mu_magnitude: float
+    mu_phase: float
+    nu_magnitude: float
+    nu_phase: float
+```
+
+Không gộp magnitude và phase thành một field.
+Không giả định mu_phase == mu_magnitude hoặc nu_phase == nu_magnitude.
+
+## Phase 1.1 — Schweizer–Sklar
+
+Implement các primitive operators theo đúng công thức paper:
+
+```python
+def schweizer_sklar_t_norm(a: float, b: float, parameter: float) -> float:
+    ...
+
+def schweizer_sklar_t_conorm(a: float, b: float, parameter: float) -> float:
+    ...
+```
+
+Yêu cầu:
+- validate domain;
+- có test cho các giá trị biên;
+- ghi chú rõ convention của parameter;
+- nếu paper có dấu hiệu không nhất quán về parameter sign/domain, tạo test đối chiếu với bảng số liệu thay vì đoán.
+
+## Phase 1.2 — CFF operational laws
+
+Implement:
+
+```python
+def cff_add(a: CFFNumber, b: CFFNumber, parameter: float) -> CFFNumber:
+    ...
+
+def cff_multiply(a: CFFNumber, b: CFFNumber, parameter: float) -> CFFNumber:
+    ...
+
+def cff_scalar_mul(weight: float, x: CFFNumber, parameter: float) -> CFFNumber:
+    ...
+
+def cff_power(x: CFFNumber, weight: float, parameter: float) -> CFFNumber:
+    ...
+```
+
+Mỗi function phải:
+- link bằng comment tới definition/equation tương ứng trong paper;
+- có test độc lập;
+- không làm tròn intermediate value sớm.
+
+## Phase 1.3 — Aggregation operators
+
+Implement:
+
+```python
+def cffsstwa(values, weights, parameter):
+    ...
+
+def cffsstowa(values, weights, parameter):
+    ...
+
+def cffssthwa(values, weights, parameter):
+    ...
+```
+
+Yêu cầu:
+- kiểm tra len(values) == len(weights);
+- kiểm tra sum(weights) ≈ 1 khi công thức yêu cầu;
+- preserve full precision;
+- chỉ round khi in kết quả.
+
+## Phase 1.4 — Paper case study
+
+Hard-code decision matrix từ paper vào:
+
+`data/paper_case.py`
+
+Alternatives:
+- HIC1
+- HIC2
+- HIC3
+- HIC4
+
+Criteria:
+- LIS1
+- LIS2
+- LIS3
+- LIS4
+
+Criterion weights ở output layer:
+- 0.23
+- 0.24
+- 0.25
+- 0.28
+
+Không tự tạo dataset mới.
+Không thay số trong paper.
+
+## Phase 1.5 — Hidden layer
+
+Dùng CFFSSTHWA theo mô tả của paper.
+
+Phải cố reproduce các intermediate values trong Table 3.
+
+Ví dụ một target:
+HIC1 / LIS1 ≈
+- mu_magnitude = 0.1091
+- mu_phase = 0.0245
+- nu_magnitude = 0.3881
+- nu_phase = 0.0212
+
+Tạo test:
+
+```python
+assert result.mu_magnitude == pytest.approx(0.1091, abs=1e-4)
+assert result.mu_phase == pytest.approx(0.0245, abs=1e-4)
+assert result.nu_magnitude == pytest.approx(0.3881, abs=1e-4)
+assert result.nu_phase == pytest.approx(0.0212, abs=1e-4)
+```
+
+Nếu Table 3 chưa reproduce được:
+DỪNG.
+Không tiếp tục final ranking bằng workaround.
+
+## Phase 1.6 — Output layer + score
+
+Implement output aggregation đúng theo paper.
+
+Sau đó implement score function theo định nghĩa của paper.
+
+Không giả định score function nếu notation chưa rõ.
+Nếu cần, trace từ output CFF values → scalar scores bằng các bảng trong paper.
+
+Expected final:
+
+```python
+expected = {
+    "HIC1": 0.0199,
+    "HIC2": 0.5478,
+    "HIC3": 0.2979,
+    "HIC4": 0.5148,
+}
+```
+
+Expected ranking:
+
+```python
+["HIC2", "HIC4", "HIC3", "HIC1"]
+```
+
+## Phase 1.7 — Sensitivity analysis
+
+Sau khi reproduce baseline thành công, chạy lại sensitivity analysis với các parameter mà paper sử dụng:
+- 0.1
+- 0.2
+- 0.3
+- 0.4
+- 0.5
+- 0.6
+
+Kiểm tra ranking có giữ:
+Z2 > Z4 > Z3 > Z1
+
+Không hard-code ranking.
+
+## Debug strategy
+
+Khi mismatch:
+1. In input.
+2. In từng phần của CFF value.
+3. So sánh từng operator.
+4. So sánh hidden layer.
+5. So sánh output layer.
+6. Cuối cùng mới so sánh score.
+
+Không debug từ final score ngược lại nếu chưa biết intermediate nào sai.
+
+## Deliverables
+
+Khi hoàn thành:
+1. Toàn bộ source code.
+2. Unit tests.
+3. `reproduce.py`.
+4. `README.md` gồm:
+   - paper metadata;
+   - công thức nào đã implement;
+   - mapping paper section → source file;
+   - expected result;
+   - actual result;
+   - sai lệch nếu có;
+   - các ambiguity/inconsistency phát hiện trong paper.
+5. Một bảng reproduction report:
+
+| Checkpoint | Paper | Code | Difference | Status |
+|---|---:|---:|---:|---|
+| Table 3 HIC1/LIS1 mu magnitude | 0.1091 | ... | ... | PASS/FAIL |
+| ... | ... | ... | ... | ... |
+| Z1 | 0.0199 | ... | ... | PASS/FAIL |
+| Z2 | 0.5478 | ... | ... | PASS/FAIL |
+| Z3 | 0.2979 | ... | ... | PASS/FAIL |
+| Z4 | 0.5148 | ... | ... | PASS/FAIL |
+
+## Phase 2 — Chưa làm cho đến khi Phase 1 PASS
+
+Chỉ sau khi numerical reproduction thành công mới phân tích FNN learning thực sự.
+
+Phase 2 có thể nghiên cứu:
+- learnable criterion weights;
+- learnable Schweizer–Sklar parameters;
+- loss function;
+- gradient-based optimization;
+- historical decision data;
+- comparison giữa paper-style FNN và trainable neural network.
+
+Không tự động implement Phase 2 trong task hiện tại.
